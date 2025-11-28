@@ -20,19 +20,28 @@ else:
     print("Device: CPU")
 
 # 2. 데이터 준비 (MNIST Dataset)
-transform = transforms.Compose([
+# 2. 데이터 준비 (MNIST Dataset)
+# Data Augmentation: 학습 데이터에 변형을 주어 모델의 일반화 성능 향상
+train_transform = transforms.Compose([
+    transforms.RandomRotation(10),      # -10도 ~ 10도 무작위 회전
+    transforms.RandomAffine(0, translate=(0.1, 0.1)), # 가로/세로 10% 내외 이동
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+test_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.5,), (0.5,))
 ])
 
 print("\n데이터셋 로드 중...")
 trainset = torchvision.datasets.MNIST(root='./data', train=True,
-                                        download=True, transform=transform)
+                                        download=True, transform=train_transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=64,
                                           shuffle=True, num_workers=0)
 
 testset = torchvision.datasets.MNIST(root='./data', train=False,
-                                       download=True, transform=transform)
+                                       download=True, transform=test_transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=64,
                                          shuffle=False, num_workers=0)
 
