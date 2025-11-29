@@ -6,6 +6,7 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import torch.optim.lr_scheduler as lr_scheduler
 
 # 1. 디바이스 설정 (MPS -> CUDA -> CPU 순서로 확인)
 # Mac의 경우 MPS(Metal Performance Shaders)를 사용하면 GPU 가속을 받을 수 있습니다.
@@ -88,14 +89,22 @@ model = MNIST_CNN().to(device)
 # 4. 손실 함수 및 최적화 설정
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
+# Learning Rate Scheduler: 5 epoch마다 lr을 0.5배로 감소
+scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
 # 5. 학습 (Training)
-epochs = 5
+# 5. 학습 (Training)
+epochs = 10 # Epoch 수 증가
 print(f"\n학습 시작 (Epochs: {epochs})...")
 start_time = time.time()
 
+train_losses = []
+train_accuracies = []
+
 for epoch in range(epochs):
     running_loss = 0.0
+    correct = 0
+    total = 0
     model.train() # 학습 모드 설정 (Dropout 적용)
     
     for i, data in enumerate(trainloader, 0):
@@ -110,9 +119,27 @@ for epoch in range(epochs):
         optimizer.step()
 
         running_loss += loss.item()
+        
+        # 정확도 계산을 위한 예측
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+        
         if i % 100 == 99:
-            print(f'[Epoch {epoch + 1}, Batch {i + 1}] loss: {running_loss / 100:.3f}')
-            running_loss = 0.0
+            # print(f'[Epoch {epoch + 1}, Batch {i + 1}] loss: {running_loss / 100:.3f}')
+            pass
+
+    # Epoch 별 결과 기록
+    epoch_loss = running_loss / len(trainloader)
+    epoch_acc = 100 * correct / total
+    train_losses.append(epoch_loss)
+    train_accuracies.append(epoch_acc)
+    
+    current_lr = scheduler.get_last_lr()[0]
+    print(f'[Epoch {epoch + 1}] Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.2f}%, LR: {current_lr:.6f}')
+    
+    # Scheduler Step
+    scheduler.step()
 
 end_time = time.time()
 print(f'학습 완료 (소요 시간: {end_time - start_time:.2f}초)')
@@ -164,3 +191,23 @@ for i in range(8):
 
 plt.savefig('mnist_cnn_predictions.png')
 print("\n예측 결과 이미지가 'mnist_cnn_predictions.png'로 저장되었습니다.")
+
+# 9. 학습 과정 시각화 (Loss & Accuracy)
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Training Loss')
+plt.title('Training Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(train_accuracies, label='Training Accuracy', color='orange')
+plt.title('Training Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy (%)')
+plt.legend()
+
+plt.savefig('mnist_cnn_training_curve.png')
+print("학습 곡선 이미지가 'mnist_cnn_training_curve.png'로 저장되었습니다.")
