@@ -87,20 +87,36 @@ def predict_image(image_path, model_path='./mnist_cnn.pth'):
         # 노이즈 제거 (Blurring)
         img_cv = cv2.GaussianBlur(img_cv, (5, 5), 0)
 
+        # 글씨 굵게 만들기 (Dilation) - 끊어진 선 연결
+        kernel = np.ones((3,3), np.uint8)
+        img_cv = cv2.dilate(img_cv, kernel, iterations=2)
+
         # Thresholding (글씨만 확실하게 흰색으로)
         _, thresh = cv2.threshold(img_cv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         # 윤곽선 검출 (Contours)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # 윤곽선 정렬 (왼쪽 -> 오른쪽)
-        digit_contours = []
+        # 1차 필터링: 너무 작은 노이즈 제거 (최소한의 크기)
+        candidates = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
-            # 노이즈 필터링: 크기가 너무 작으면 제외
-            # 높이가 이미지 높이의 1/30보다 작으면 노이즈로 간주 (약 33px @ 1000px height)
-            # 면적도 고려 (w * h > 500)
-            if h > img_cv.shape[0] / 30 and w > 20 and (w * h) > 500:
+            if w > 5 and h > 5:
+                candidates.append((x, y, w, h))
+
+        if not candidates:
+            print("No digits detected.")
+            return
+
+        # 2차 필터링: 최대 면적(Max Area) 기반 노이즈 제거
+        # 가장 큰 컨투어는 숫자일 확률이 높음. 그 크기의 5% 미만은 노이즈로 간주.
+        areas = [w * h for x, y, w, h in candidates]
+        max_area = max(areas)
+        
+        digit_contours = []
+        for x, y, w, h in candidates:
+            area = w * h
+            if area > max_area * 0.05:
                 digit_contours.append((x, y, w, h))
         
         # x좌표 기준으로 정렬
