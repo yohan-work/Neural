@@ -341,45 +341,80 @@ def main():
                     gesture_name = "Predict"
                     curr_time = time.time()
                     if curr_time - last_action_time > cooldown:
-                        # Prediction Logic (Same as before)
+                        # Prediction Logic (Multi-character support)
                         gray_canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
                         contours_canvas, _ = cv2.findContours(gray_canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                         
-                        if len(contours_canvas) > 0:
-                            x, y, w, h = cv2.boundingRect(np.vstack(contours_canvas))
-                            padding = 20
-                            x = max(0, x - padding); y = max(0, y - padding)
-                            w = min(canvas.shape[1] - x, w + 2 * padding)
-                            h = min(canvas.shape[0] - y, h + 2 * padding)
+                        # 1. Gather all potential character bounding boxes
+                        candidates = []
+                        for cnt in contours_canvas:
+                            x, y, w, h = cv2.boundingRect(cnt)
+                            if w > 10 and h > 10: # Minimum size filter to remove noise
+                                candidates.append((x, y, w, h))
+                        
+                        if candidates:
+                             # 2. Filter noise based on relative size to the largest element
+                            areas = [w * h for x, y, w, h in candidates]
+                            max_area = max(areas)
                             
-                            roi = gray_canvas[y:y+h, x:x+w]
-                            roi_pil = Image.fromarray(roi)
-                            max_dim = max(roi_pil.size)
-                            new_img = Image.new("L", (max_dim, max_dim), 0)
-                            new_img.paste(roi_pil, ((max_dim - roi_pil.width) // 2, (max_dim - roi_pil.height) // 2))
+                            valid_boxes = []
+                            for i, (x, y, w, h) in enumerate(candidates):
+                                if areas[i] > max_area * 0.05: # Keep if > 5% of max area
+                                    valid_boxes.append((x, y, w, h))
                             
-                            # Prediction
-                            with torch.no_grad():
-                                if current_mode == "digit" and models_loaded["digit"]:
-                                    new_img_resized = new_img.resize((28, 28), Image.Resampling.BICUBIC)
-                                    img_tensor = transform(new_img_resized).unsqueeze(0).to(device)
-                                    output = digit_model(img_tensor)
-                                    prob = torch.nn.functional.softmax(output, dim=1)
-                                    conf, pred = torch.max(prob, 1)
-                                    res_char = str(pred.item())
-                                elif current_mode == "alpha" and models_loaded["alpha"]:
-                                    new_img_resized = new_img.resize((28, 28), Image.Resampling.BICUBIC)
-                                    img_tensor = emnist_transform_fn(new_img_resized).unsqueeze(0).to(device)
-                                    output = alpha_model(img_tensor)
-                                    prob = torch.nn.functional.softmax(output, dim=1)
-                                    conf, pred = torch.max(prob, 1)
-                                    res_char = alphabet_map[pred.item()]
-                                else:
-                                    res_char = "Err"
-                                    conf = torch.tensor(0.0)
-
-                            prediction_text = f"{res_char} ({conf.item()*100:.1f}%)"
+                            # 3. Sort by X coordinate (Left -> Right)
+                            valid_boxes.sort(key=lambda b: b[0])
+                            
+                            results = []
+                            total_conf = 0.0
+                            
+                            for x, y, w, h in valid_boxes:
+                                padding = 20
+                                x_p = max(0, x - padding)
+                                y_p = max(0, y - padding)
+                                w_p = min(canvas.shape[1] - x_p, w + 2 * padding)
+                                h_p = min(canvas.shape[0] - y_p, h + 2 * padding)
+                                
+                                roi = gray_canvas[y_p:y_p+h_p, x_p:x_p+w_p]
+                                roi_pil = Image.fromarray(roi)
+                                max_dim = max(roi_pil.size)
+                                new_img = Image.new("L", (max_dim, max_dim), 0)
+                                new_img.paste(roi_pil, ((max_dim - roi_pil.width) // 2, (max_dim - roi_pil.height) // 2))
+                                
+                                # Prediction for this character
+                                with torch.no_grad():
+                                    if current_mode == "digit" and models_loaded["digit"]:
+                                        new_img_resized = new_img.resize((28, 28), Image.Resampling.BICUBIC)
+                                        img_tensor = transform(new_img_resized).unsqueeze(0).to(device)
+                                        output = digit_model(img_tensor)
+                                        prob = torch.nn.functional.softmax(output, dim=1)
+                                        conf, pred = torch.max(prob, 1)
+                                        res_char = str(pred.item())
+                                    elif current_mode == "alpha" and models_loaded["alpha"]:
+                                        new_img_resized = new_img.resize((28, 28), Image.Resampling.BICUBIC)
+                                        img_tensor = emnist_transform_fn(new_img_resized).unsqueeze(0).to(device)
+                                        output = alpha_model(img_tensor)
+                                        prob = torch.nn.functional.softmax(output, dim=1)
+                                        conf, pred = torch.max(prob, 1)
+                                        res_char = alphabet_map[pred.item()]
+                                    else:
+                                        res_char = "?"
+                                        conf = torch.tensor(0.0)
+                                
+                                results.append(res_char)
+                                total_conf += conf.item()
+                                
+                                # Visual feedback: draw box around recognized char
+                                cv2.rectangle(frame, (x_p, y_p), (x_p+w_p, y_p+h_p), (0, 255, 0), 2)
+                            
+                            final_str = "".join(results)
+                            avg_conf = (total_conf / len(results)) * 100 if results else 0
+                            prediction_text = f"{final_str} ({avg_conf:.1f}%)"
                             print(f"Prediction: {prediction_text}")
+                            
+                        else:
+                            prediction_text = "Empty/Noise"
+
                         last_action_time = curr_time
                     x1, y1 = 0, 0
                 else:
